@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -88,7 +91,23 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	key := fmt.Sprintf("%x.mp4", randBytes)
+	ratio, err := getVideoAspectRatio(temp.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get the videos aspect ratio", err)
+		return
+	}
+
+	var prefix string
+	switch ratio {
+	case "16:9":
+		prefix = "landscape"
+	case "9:16":
+		prefix = "portrait"
+	default:
+		prefix = "other"
+	}
+
+	key := fmt.Sprintf("%s/%x.mp4", prefix, randBytes)
 
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
@@ -109,6 +128,50 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't update video URL", err)
 		return
+	}
+
+}
+
+type FFProbeOutput struct {
+	Streams []Stream `json:"streams"`
+}
+
+type Stream struct {
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+func getVideoAspectRatio(filePath string) (string, error) {
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
+	var output bytes.Buffer
+	cmd.Stdout = &output
+
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("failed to run ffprobe: %w", err)
+	}
+
+	var ffprobeData FFProbeOutput
+	if err := json.Unmarshal(output.Bytes(), &ffprobeData); err != nil {
+		return "", fmt.Errorf("failed to unmarshal json: %w", err)
+	}
+
+	if len(ffprobeData.Streams) == 0 {
+		return "", fmt.Errorf("no streams found in video")
+	}
+
+	width := ffprobeData.Streams[0].Width
+	height := ffprobeData.Streams[0].Height
+
+	ratio := float64(width) / float64(height)
+
+	const tolerance = 0.1
+
+	if ratio > (16.0/9.0-tolerance) && ratio < (16.0/9.0+tolerance) {
+		return "16:9", nil
+	} else if ratio > (9.0/16.0-tolerance) && ratio < (9.0/16.0+tolerance) {
+		return "9:16", nil
+	} else {
+		return "other", nil
 	}
 
 }
