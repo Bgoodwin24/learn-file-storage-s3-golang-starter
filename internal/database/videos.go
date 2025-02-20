@@ -21,6 +21,7 @@ type CreateVideoParams struct {
 	Title       string    `json:"title"`
 	Description string    `json:"description"`
 	UserID      uuid.UUID `json:"user_id"`
+	VideoURL    string    `json:"video_url"`
 }
 
 func (c Client) GetVideos(userID uuid.UUID) ([]Video, error) {
@@ -75,10 +76,11 @@ func (c Client) CreateVideo(params CreateVideoParams) (Video, error) {
 		updated_at,
 		title,
 		description,
-		user_id
-	) VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?)
+		user_id,
+		video_url
+	) VALUES (?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, ?, ?, ?)
 	`
-	_, err := c.db.Exec(query, id, params.Title, params.Description, params.UserID)
+	_, err := c.db.Exec(query, id, params.Title, params.Description, params.UserID, params.VideoURL)
 	if err != nil {
 		return Video{}, err
 	}
